@@ -380,69 +380,6 @@ regsdn<-fread('outputs/01-tf-downstream_gene-inference/TF_regulons_down.csv')
 unique(regsdn$TF)
 
 
-
-#ChipSeq Validation of regulon ####
-#test MECP2 regulon
-#MEPC2: MBD prot, binding specifically to methylated DNA.
-# #MECP2 is dispensible in stem cells, but is essential for embryonic development. 
-# #MECP2 gene mutations are the cause of most cases of Rett syndrome,
-# #a progressive neurologic developmental disorder and one of the most common causes of cognitive disability in females
-library(data.table)
-out1<-fp(out,'validation_Mecp2')
-dir.create(out1)
-bedrep1<-fread('ref-data/validation/Mecp2/GSE71126_RAW/mecp2_rep1_c5.0_l200_g30_peaks.narrowPeak',
-               select = c(1:5,7:9),
-               col.names = c('chr','start','end','name','score','signalValue','pvalue','qvalue'))
-
-bedrep1 #1.2M
-
-bedrep2<-fread('ref-data/validation/Mecp2/GSE71126_RAW/mecp2_rep2_c5.0_l200_g30_peaks.narrowPeak',
-               select = c(1:5,7:9),
-               col.names = c('chr','start','end','name','score','signalValue','pvalue','qvalue'))
-bedrep2 #1.4M
-#merge common peak
-#source('../utils/r_utils.R')
-bedinter<-bed_inter(bedrep1,bedrep2)
-bedinter#1209697
-
-#annotate Mecp2 bed +\- 10kb TSS
-gtfs<-fread('ref-data/validation/gencode.vM32.annotation.gtf.gz',select = c(1,2,3,4,5,7,9),col.names = c('chr','source','type','start','end','strand','gene_names'))
-gtfs<-gtfs[type=='gene']
-gtfs[,gene_id:=str_extract(gene_names,'ENSMUSG[0-9]+')]
-gtfs[,gene_type:=str_remove_all(sapply(gene_names,function(x)str_split(x,';')[[1]][2]),'gene_type|"')]
-gtfs[,gene_name:=str_remove_all(sapply(gene_names,function(x)str_split(x,';')[[1]][3]),'gene_name|"')]
-#filter for genes expressed
-expressed_genes<-fread('ref-data/raw_expr/raw_rna_counts_clean_filtered.csv.gz')$gene_id
-length(expressed_genes)#14k
-gtfsf<-gtfs[intersect(expressed_genes,gene_id), on='gene_id']
-gtfsf[,chr:=factor(chr,levels = paste0('chr',c(1:22,'X','Y')))]
-gtfsf[,startwin:=ifelse(strand=='+',start-10000,end-10000)]
-gtfsf[startwin<0,startwin:=1]
-gtfsf[,endwin:=ifelse(strand=='+',start+10000,end+10000)]
-
-bedinter_anno<-bed_inter(bedinter[,.(V1,V2,V3,V4,V5)],
-                         gtfsf[,.(chr,startwin,endwin,gene_id,gene_name)][order(chr,startwin)],
-                         select =c(1:5,9:10),
-                         col.names = c('chr','start','end','peak','score','gene_id','gene_name'))
-bedinter_anno#185k peak in expressed genes
-unique(bedinter_anno,by='gene_id') #in 13k genes / 14k genes
-
-#overlap regulon signif ? => not too restrictive
-Mecp2p_reg<-fread('outputs/01-tf-downstream_gene-inference/TF_regulons_up.csv')[TF=='Mecp2']
-Mecp2p_reg #9.7kgenes 
-
-#score enriched in regulon?
-expressed_genes<-fread('ref-data/raw_expr/raw_rna_counts_clean_filtered.csv.gz')$gene_name
-
-expressed_genes_mecp2pbind<-unique(bedinter_anno[expressed_genes,on='gene_name'][order(-score)],by = 'gene_name')
-expressed_genes_mecp2pbind[is.na(score),score:=0]
-expressed_genes_mecp2pbind[,in_regulon:=gene_name%in%Mecp2p_reg$gene]
-
-expressed_genes_mecp2pbind[,`in Mecp2 regulon`:=gene_name%in%Mecp2p_reg$gene]
-
-expressed_genes_mecp2pbind[,p:=wilcox.test(score[(in_regulon)],score[!(in_regulon)])$p.value]
-fwrite(expressed_genes_mecp2pbind,fp(out1,'expressed_genes_ChIPscore_Mecp2.csv.gz'))
-
 #ANNOT modules####
 library(data.table)
 #install.packages('gprofiler2')
